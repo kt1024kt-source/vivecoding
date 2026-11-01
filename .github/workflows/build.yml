@@ -1,0 +1,81 @@
+# 자동 빌드와 배포 (DEPLOY_PLAN 2.1, 작업 5)
+# 30분마다 build.py → 배포 폴더 → Vercel CLI 배포 → 09시·21시(KST) 뒤 첫 빌드에서 오늘의 이슈 기록 커밋
+# 키는 Repository secrets에서만 읽는다. data.json은 커밋하지 않는다(NFR-03)
+name: build-and-deploy
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"  # UTC 기준. 매시 정각 무렵은 늦거나 빠질 수 있어 7분·37분(GitHub 문서)
+  workflow_dispatch:
+
+permissions:
+  contents: write  # history/issues.csv 커밋
+
+concurrency:
+  group: build-and-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 뉴스 누적 파일 받기 (store/)
+        uses: actions/cache/restore@v4
+        with:
+          path: store
+          key: store-${{ github.run_id }}
+          restore-keys: store-
+
+      - name: 빌드
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          YES24_API_KEY: ${{ secrets.YES24_API_KEY }}
+          DATA4LIBRARY_API_KEY: ${{ secrets.DATA4LIBRARY_API_KEY }}
+        run: python build.py
+
+      - name: 뉴스 누적 파일 남기기 (store/)
+        if: always() && hashFiles('store/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: store
+          key: store-${{ github.run_id }}
+
+      - name: 배포 폴더 만들기 (이슈가 비면 여기서 멈춤)
+        run: python deploy/make_bundle.py
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Vercel 배포
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # 첫 배포 때는 두 ID가 아직 없다. 그때는 둘 다 지워 CLI가 새 프로젝트를 만들게 한다
+          if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then unset VERCEL_ORG_ID VERCEL_PROJECT_ID; fi
+          npx --yes vercel@64.5.0 deploy deploy_out/trandeer --prod --yes --token "$VERCEL_TOKEN"
+
+      - name: 오늘의 이슈 기록 (09시·21시 회차)
+        run: |
+          python deploy/record_issues.py
+          if [ -n "$(git status --porcelain history)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add history/issues.csv
+            git commit -m "오늘의 이슈 기록"
+            git pull --rebase
+            git push
+          fi

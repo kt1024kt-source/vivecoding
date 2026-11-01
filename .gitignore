@@ -12,6 +12,8 @@ web/data.json
 store/
 # 시연용 스냅샷(정상 빌드 data.json 한 벌, NFR-03). YES24 목록이 들어 있어 기록에 쌓지 않는다
 snapshot/
+# 배포 폴더(deploy/make_bundle.py가 만들고 Actions가 Vercel에 올림, data.json이 들어 있음)
+deploy_out/
 
 # 기획 문서, 작업기록, 남의 API 매뉴얼(공개 저장소에 올리지 않음)
 PlanMd/
