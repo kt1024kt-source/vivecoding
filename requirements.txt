@@ -1,0 +1,5 @@
+# build.py(데이터 수집과 분석)에 필요한 것. 로컬 .venv와 자동 빌드가 이 목록으로 설치한다 (Python 3.11.9에서 확인)
+# 화면은 web/의 HTML/CSS/JS라 Python 패키지가 필요 없다
+kiwipiepy==0.24.1
+requests==2.34.2
+pandas==3.1.0

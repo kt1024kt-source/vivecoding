@@ -1,0 +1,31 @@
+# Git에 올리지 않을 것
+# 작업 공간 맨 위의 .gitignore와 겹치지만, 이 폴더만 따로 저장소로 올릴 때를 위해 둔다.
+
+# 인증키와 비밀 설정
+.env
+.env.*
+*key*.txt
+
+# build.py가 만드는 데이터(YES24 축적 금지: 기록에 쌓지 않고 빌드 때마다 덮어씀)
+web/data.json
+# 뉴스 누적 파일(최근 12시간치만 남김, 자동 빌드에서는 Actions 캐시에 둠)
+store/
+# 시연용 스냅샷(정상 빌드 data.json 한 벌, NFR-03). YES24 목록이 들어 있어 기록에 쌓지 않는다
+snapshot/
+
+# 기획 문서, 작업기록, 남의 API 매뉴얼(공개 저장소에 올리지 않음)
+PlanMd/
+log.md
+input/
+sc/
+
+# Python이 만드는 파일
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 편집기와 OS가 만드는 파일
+.vscode/
+.DS_Store
+Thumbs.db

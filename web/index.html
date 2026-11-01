@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>trandeer</title>
+<!--
+  PRD 7장 화면. 탭 3개: 오늘(#today) / 살펴보기(#explore) / 산정 기준(#method). 10-29 작업자 요청으로 한 페이지에서 탭으로 나눔.
+  data.json만 읽고 외부 API는 부르지 않는다(NFR-07).
+  워드클라우드는 web/vendor/wordcloud2.js(1.2.2, MIT)를 내려받아 쓴다. 시연 때 CDN이 막혀도 돌게 하려고.
+  data.json의 글자(기사 제목 등)는 모두 textContent로 넣어 HTML로 해석되지 않게 한다.
+-->
+<style>
+  @font-face { font-family: "NanumGothic"; src: url("fonts/NanumGothic-Regular.ttf") format("truetype"); font-display: swap; }
+
+  :root {
+    --bg: #f3f5f9; --card: #ffffff; --text: #1d2433; --muted: #667085; --line: #e4e7ec;
+    --accent: #2f6fed; --accent-soft: #e8f0fe; --warn: #b42318; --warn-soft: #fef3f2;
+    --news: #2f6fed; --books: #0e9384; --combined: #7a5af8; --warm: #e04f16;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1420; --card: #171e2c; --text: #e6e9ef; --muted: #98a2b3; --line: #2a3345;
+      --accent: #6c9cff; --accent-soft: #1e2a44; --warn: #f97066; --warn-soft: #3a1d1b;
+      --news: #6c9cff; --books: #3cc9b4; --combined: #a48afb; --warm: #fd853a;
+      --shadow: none;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: "NanumGothic", sans-serif; line-height: 1.6; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  .muted { color: var(--muted); font-size: .88rem; }
+  button { font: inherit; color: inherit; }
+
+  /* 머리말 */
+  header { padding: 28px 0 4px; }
+  .brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .brand h1 { margin: 0; font-size: 1.9rem; letter-spacing: -.02em; }
+  .brand p { margin: 0; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem; }
+  .chip b { font-weight: normal; color: var(--muted); margin-right: 4px; }
+  .chip.notice { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .errors p { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: .9rem; }
+
+  /* 탭 막대: 화면을 내려도 위에 붙어 있다 */
+  nav.tabbar { position: sticky; top: 0; z-index: 5; background: var(--bg); margin-top: 12px; border-bottom: 1px solid var(--line); }
+  nav.tabbar .wrap { display: flex; gap: 4px; overflow-x: auto; }
+  nav.tabbar a { padding: 12px 16px 10px; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
+  nav.tabbar a:hover { text-decoration: none; color: var(--text); }
+  nav.tabbar a[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: bold; }
+
+  /* 카드 배치 */
+  .panel { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; padding: 16px 0 8px; }
+  .panel[hidden] { display: none; }
+  .card { grid-column: span 12; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; }
+  .w7 { grid-column: span 7; } .w6 { grid-column: span 6; } .w5 { grid-column: span 5; }
+  @media (max-width: 820px) { .w7, .w6, .w5 { grid-column: span 12; } }
+  .card h2 { margin: 0 0 2px; font-size: 1.15rem; }
+  .card .sub { margin: 0 0 14px; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+
+  /* 오늘의 이슈: 넓은 화면에서는 2열(1~5, 6~10) */
+  #issues { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-template-rows: repeat(5, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+  @media (max-width: 820px) { #issues { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
+  #issues li button {
+    width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+    padding: 8px 10px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer;
+  }
+  #issues li button:hover { background: var(--accent-soft); }
+  .rank { font-size: .9rem; color: var(--muted); text-align: right; }
+  #issues li:nth-child(-n+3) .rank { color: var(--accent); font-weight: bold; }
+  .word { font-size: 1.05rem; overflow-wrap: anywhere; }
+  .bar { display: block; height: 4px; margin-top: 4px; border-radius: 2px; background: var(--accent); opacity: .55; }
+  .count { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+
+  /* 워드클라우드 */
+  .cloud-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .cloud-tabs button { border: 1px solid var(--line); background: var(--card); font-size: .92rem; padding: 5px 14px; border-radius: 999px; cursor: pointer; }
+  .cloud-tabs button[aria-selected="true"] { background: var(--tab, var(--accent)); border-color: transparent; color: #fff; }
+  .cloud-box { width: 100%; aspect-ratio: 16 / 10; min-height: 260px; }
+  .cloud-box.wide { aspect-ratio: 16 / 7; }
+  .cloud-box canvas { width: 100%; height: 100%; display: block; }
+  .cloud-info { min-height: 1.6em; margin: 6px 0 0; }
+
+  /* 이슈 상세 */
+  .picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .picker button { border: 1px solid var(--line); background: var(--card); font-size: .88rem; padding: 3px 12px; border-radius: 999px; cursor: pointer; }
+  .picker button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: #fff; }
+  .rows { list-style: none; margin: 0; padding: 0; }
+  .rows li { padding: 8px 0; border-top: 1px solid var(--line); }
+  .rows li:first-child { border-top: 0; }
+  .rows a { color: var(--text); overflow-wrap: anywhere; }
+  .rows a:hover { color: var(--accent); }
+  .detail-h { margin: 22px 0 2px; font-size: 1rem; }
+  .book-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); font-size: .88rem; }
+  .book-hint .more, #issue-books-sub .more { margin-top: 0; }
+  .book-hint .rows { width: 100%; margin: 2px 0 0; }
+  .rows details { font-size: .84rem; color: var(--muted); }
+  .rows details summary { cursor: pointer; width: fit-content; }
+  .rows details p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .books li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+  .more { margin-top: 10px; border: 1px solid var(--line); background: none; color: var(--accent); font-size: .88rem; padding: 4px 14px; border-radius: 999px; cursor: pointer; }
+
+  /* 공통 키워드 */
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tags span { background: var(--accent-soft); color: var(--accent); padding: 4px 12px; border-radius: 999px; }
+
+  /* AI 도우미 (FR-50) */
+  .chat-log { background: var(--bg); border-radius: 10px; padding: 12px 14px; font-size: .92rem; max-height: 460px; overflow-y: auto; }
+  .chat-log p { margin: 0 0 6px; }
+  .msg { margin: 0 0 12px; }
+  .msg.q { margin-left: 18%; background: var(--accent-soft); color: var(--text); padding: 8px 12px; border-radius: 12px 12px 2px 12px; }
+  .msg.a { margin-right: 6%; background: var(--card); padding: 8px 12px; border-radius: 12px 12px 12px 2px; border: 1px solid var(--line); }
+  .msg.a.wait, .msg.a.fail { color: var(--muted); }
+  .msg ol { margin: 6px 0 0; padding-left: 20px; font-size: .86rem; }
+  .msg ol a { color: var(--text); overflow-wrap: anywhere; }
+  .chat-form { display: flex; gap: 8px; margin-top: 10px; }
+  .chat-form input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--card); color: var(--text); font: inherit; }
+  .chat-form button { border: 0; border-radius: 10px; padding: 8px 16px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  .chat-form button:disabled { background: var(--line); color: var(--muted); cursor: default; }
+  .chat-note { margin: 8px 0 0; font-size: .8rem; }
+  .msg .meta { margin-top: 6px; font-size: .78rem; color: var(--muted); }
+  .msg .msg-h { margin-top: 10px; font-size: .8rem; font-weight: 600; color: var(--muted); }
+  .msg .msg-h + ol { margin-top: 2px; }
+  .msg > div.muted { font-size: .84rem; }
+  /* 모델 선택(Claude Code 모델 선택 버튼처럼 현재 값을 보이고 누르면 메뉴) */
+  .chat-form { position: relative; }
+  .chat-form .model-btn { background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 10px; white-space: nowrap; font-size: .82rem; }
+  .chat-form .model-btn:hover, .chat-form .model-btn[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+  .model-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 5; width: min(280px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 6px; }
+  .model-menu h3 { margin: 6px 8px 4px; font-size: .75rem; font-weight: 600; color: var(--muted); }
+  .model-menu .opt { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 7px 8px; color: var(--text); font: inherit; cursor: pointer; }
+  .model-menu .opt:hover, .model-menu .opt:focus-visible { background: var(--accent-soft); outline: none; }
+  .model-menu .opt small { grid-column: 1; color: var(--muted); font-size: .76rem; }
+  .model-menu .opt .check { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); }
+  .model-menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+  .seg { display: flex; gap: 4px; margin: 2px 8px 6px; background: var(--bg); border-radius: 8px; padding: 3px; }
+  .seg button { flex: 1; background: none; border: 0; border-radius: 6px; padding: 5px 0; color: var(--muted); font: inherit; font-size: .84rem; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
+
+  /* 산정 기준 */
+  .method h3 { font-size: 1rem; margin: 22px 0 6px; }
+  .method h3:first-of-type { margin-top: 6px; }
+  .method p, .method li { font-size: .93rem; }
+  .method ul { margin: 4px 0; padding-left: 20px; }
+  .table-scroll { overflow-x: auto; }
+  .method table { border-collapse: collapse; font-size: .88rem; }
+  .method th, .method td { border-bottom: 1px solid var(--line); padding: 4px 14px 4px 0; text-align: left; white-space: nowrap; }
+  .wordlist { color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
+
+  footer { padding: 18px 0 36px; }
+  footer p { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>trandeer</h1>
+      <p>알고리즘 추천 없이, 모두에게 같은 기준으로 고른 오늘의 사회 이슈</p>
+    </div>
+    <div class="chips" id="chips"><span class="chip">data.json 읽는 중…</span></div>
+    <div class="errors" id="errors"></div>
+  </header>
+</div>
+
+<nav class="tabbar">
+  <div class="wrap" role="tablist">
+    <a role="tab" href="#today" data-tab="today">오늘</a>
+    <a role="tab" href="#explore" data-tab="explore">살펴보기</a>
+    <a role="tab" href="#method" data-tab="method">산정 기준</a>
+  </div>
+</nav>
+
+<div class="wrap">
+  <!-- 탭 1: 오늘 -->
+  <main class="panel" id="tab-today" role="tabpanel">
+    <section class="card">
+      <h2>오늘의 이슈</h2>
+      <p class="sub muted" id="issues-sub"></p>
+      <ol id="issues"></ol>
+    </section>
+
+    <!-- 서점 vs 도서관(FR-41): 사는 책과 빌리는 책을 나란히 -->
+    <section class="card w6">
+      <h2>서점 베스트셀러 <span class="muted">· 예스24</span></h2>
+      <p class="sub muted" id="books-sub"></p>
+      <ol class="rows books" id="books"></ol>
+      <button class="more" id="books-more" hidden>더 보기</button>
+    </section>
+
+    <section class="card w6">
+      <h2>도서관 인기 대출 <span class="muted">· 도서관 정보나루</span></h2>
+      <p class="sub muted" id="library-sub"></p>
+      <ol class="rows books" id="library"></ol>
+      <button class="more" id="library-more" hidden>더 보기</button>
+    </section>
+
+    <section class="card">
+      <h2>공통 키워드</h2>
+      <p class="sub muted">뉴스와 도서 양쪽 상위 키워드에 모두 나온 단어</p>
+      <div class="tags" id="common"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>뉴스 워드클라우드</h2>
+        <a href="#explore">도서·종합 워드클라우드는 살펴보기에서 →</a>
+      </div>
+      <p class="sub muted" id="preview-sub"></p>
+      <div class="cloud-box wide"><canvas id="cloud-preview" aria-label="뉴스 워드클라우드"></canvas></div>
+      <p class="muted cloud-info" id="preview-info"></p>
+    </section>
+  </main>
+
+  <!-- 탭 2: 살펴보기 -->
+  <main class="panel" id="tab-explore" role="tabpanel" hidden>
+    <section class="card">
+      <h2>워드클라우드</h2>
+      <p class="sub muted" id="cloud-sub"></p>
+      <div class="cloud-tabs" id="cloud-tabs">
+        <button data-cloud="news" style="--tab: var(--news)">뉴스</button>
+        <button data-cloud="books" style="--tab: var(--books)">도서</button>
+        <button data-cloud="combined" style="--tab: var(--combined)">종합</button>
+      </div>
+      <div class="cloud-box wide"><canvas id="cloud-main" aria-label="워드클라우드"></canvas></div>
+      <p class="muted cloud-info" id="cloud-info"></p>
+    </section>
+
+    <section class="card w7" id="detail">
+      <h2>이슈 상세</h2>
+      <p class="sub muted" id="detail-sub"></p>
+      <div class="picker" id="picker"></div>
+      <ul class="rows" id="articles"></ul>
+      <h3 class="detail-h">관련 도서</h3>
+      <p class="sub muted" id="issue-books-sub"></p>
+      <ul class="rows" id="issue-books"></ul>
+    </section>
+
+    <section class="card w5" id="chat">
+      <h2>AI 도우미 <span class="muted">· Gemini</span></h2>
+      <p class="sub muted">이 화면의 이슈, 기사 제목, 도서 목록 안에서만 답합니다. 없는 내용은 「근거 부족」이라고 답합니다.</p>
+      <div class="chat-log" id="chat-log" aria-live="polite">
+        <p>예: 「방산 관련해서 오늘 무슨 일이 있었어?」, 「서점과 도서관 1위 책은?」</p>
+        <p class="muted">워드클라우드의 단어를 누르면 그 단어로 바로 물어봅니다.</p>
+      </div>
+      <form class="chat-form" id="chat-form">
+        <input type="text" id="chat-input" maxlength="200" placeholder="질문을 입력하세요" aria-label="질문 입력" autocomplete="off">
+        <button type="button" class="model-btn" id="model-btn" aria-haspopup="true" aria-expanded="false" aria-controls="model-menu"></button>
+        <button type="submit" id="chat-send">보내기</button>
+        <div class="model-menu" id="model-menu" role="menu" hidden></div>
+      </form>
+      <p class="chat-note muted">질문은 Google Gemini로 전송되며 서비스 개선에 쓰일 수 있습니다. 개인정보는 넣지 마세요.</p>
+    </section>
+  </main>
+
+  <!-- 탭 3: 산정 기준 -->
+  <main class="panel method" id="tab-method" role="tabpanel" hidden>
+    <section class="card">
+      <h2>산정 기준</h2>
+      <p class="sub muted">이 서비스는 개인화하지 않습니다. 같은 시각에 들어온 사람은 모두 같은 화면을 봅니다. 아래 기준으로만 고릅니다.</p>
+      <div id="method-body"></div>
+    </section>
+  </main>
+
+  <footer class="muted">
+    <p>데이터 출처: 네이버 뉴스 검색 API(NAVER API HUB), 예스24 Open API(베스트셀러), 도서관 정보나루(인기 대출 도서). 베스트셀러 정보와 상세 링크는 예스24, 인기 대출 정보와 상세 링크는 도서관 정보나루에서 제공합니다.</p>
+    <p>이 서비스는 개인화하지 않습니다. 같은 시각에 들어온 사람은 모두 같은 화면을 봅니다.</p>
+    <p>부산대학교 문헌정보학과 바이브코딩 공모전 출품작 · 글꼴 나눔고딕(OFL) · 워드클라우드 wordcloud2.js(MIT)</p>
+  </footer>
+</div>
+
+<script src="vendor/wordcloud2.js"></script>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+// 요소를 만들고 글자는 textContent로 넣는다(HTML 주입 방지)
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c);
+  return node;
+}
+
+// 바깥 링크는 http(s)만 쓴다
+function safeLink(url, text) {
+  const ok = /^https?:\/\//i.test(url || "");
+  return ok ? el("a", { href: url, target: "_blank", rel: "noopener", text }) : el("span", { text });
+}
+
+const KST = { timeZone: "Asia/Seoul" };
+const fmtTime = s => new Date(s).toLocaleString("ko-KR", { ...KST, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+const fmtHM = s => new Date(s).toLocaleTimeString("ko-KR", { ...KST, hour: "2-digit", minute: "2-digit", hour12: false });
+const fmtDate = s => new Date(s).toLocaleDateString("ko-KR", { ...KST, month: "long", day: "numeric" });  // 예스24는 하루 1회라 날짜만
+const fmtNum = n => Number(n).toLocaleString("ko-KR");
+
+let data;
+
+fetch("data.json", { cache: "no-store" })
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { data = d; render(); })
+  .catch(() => {
+    $("chips").replaceChildren(el("span", { class: "chip", text: "데이터 없음" }));
+    // 파일을 직접 열면(file://) 브라우저가 data.json 읽기를 막는다
+    $("errors").replaceChildren(el("p", { text: location.protocol === "file:"
+      ? "파일로 직접 열면 데이터를 읽을 수 없습니다. run.bat을 실행하거나 http://127.0.0.1:8000 으로 여세요."
+      : "data.json이 없습니다. 먼저 build.py를 실행하세요." }));
+  });
+
+function render() {
+  renderHeader();
+  renderIssues();
+  renderBooks();
+  renderCommon();
+  renderCloudTabs();
+  renderMethod();
+  renderChat();
+  selectIssue(data.issues[0] && data.issues[0].word);
+  window.addEventListener("hashchange", route);
+  route();
+}
+
+/* 탭 이동. 주소: #today, #explore, #explore/키워드, #method */
+function route() {
+  const [tab, word] = location.hash.slice(1).split("/");
+  const name = ["today", "explore", "method"].includes(tab) ? tab : "today";
+  for (const a of document.querySelectorAll("nav.tabbar a")) a.setAttribute("aria-selected", String(a.dataset.tab === name));
+  for (const p of document.querySelectorAll(".panel")) p.hidden = p.id !== `tab-${name}`;
+  if (word) selectIssue(decodeURIComponent(word));
+  drawVisibleClouds();
+}
+
+function openIssue(word) {
+  location.hash = `explore/${encodeURIComponent(word)}`;
+  window.scrollTo({ top: 0 });
+}
+
+/* 머리말 (FR-01, FR-03, FR-04) */
+function renderHeader() {
+  const n = data.news || {}, b = data.books;
+  const today = new Date().toLocaleDateString("ko-KR", { ...KST, year: "numeric", month: "long", day: "numeric", weekday: "short" });
+  const chip = (label, value) => el("span", { class: "chip" }, el("b", { text: label }), value);
+  const chips = [chip("오늘", today)];
+  if (n.collected_at) chips.push(chip("뉴스 수집", fmtTime(n.collected_at)));
+  if (b) chips.push(chip("예스24", `${fmtDate(b.pub_date)} 기준`));
+  if (data.library) chips.push(chip("도서관 대출", `${fmtDate(data.library.start)}~${fmtDate(data.library.end)}`));
+  chips.push(el("a", { class: "chip notice", href: "#method", text: "개인화하지 않습니다 · 산정 기준 보기" }));
+  $("chips").replaceChildren(...chips);
+  $("errors").replaceChildren(...(data.errors || []).map(e => el("p", { text: `일부 데이터를 새로 받지 못했습니다: ${e}` })));
+}
+
+/* 오늘의 이슈 (FR-11, FR-12) */
+function renderIssues() {
+  const n = data.news || {};
+  const gaps = (n.gaps || []).map(([a, b]) => `${fmtHM(a)}~${fmtHM(b)}`);
+  $("issues-sub").textContent = data.issues.length
+    ? `최근 ${data.method.target_hours}시간 중 ${n.covered_hours}시간치 기사 ${fmtNum(n.article_count)}건 · 언론사 ${fmtNum(n.outlet_count)}곳`
+      + (gaps.length ? ` · 수집 못 한 구간 ${gaps.join(", ")}` : "") + " · 누르면 관련 기사"
+    : "이번에는 뉴스 데이터를 받지 못했습니다.";
+  const top = Math.max(...data.issues.map(i => i.outlet_count), 1);
+  $("issues").replaceChildren(...data.issues.map((i, k) => el("li", {},
+    el("button", { onclick: () => openIssue(i.word) },
+      el("span", { class: "rank", text: k + 1 }),
+      el("span", {}, el("span", { class: "word", text: i.word }),
+                     el("span", { class: "bar", style: `width:${Math.max(4, 100 * i.outlet_count / top)}%` })),
+      el("span", { class: "count", text: `언론사 ${i.outlet_count}곳 · 기사 ${fmtNum(i.article_count)}건` })))));
+}
+
+/* 이슈 상세 (FR-14, FR-30) */
+function selectIssue(word) {
+  $("picker").replaceChildren(...data.issues.map(i =>
+    el("button", { "aria-pressed": String(i.word === word), text: i.word, onclick: () => openIssue(i.word) })));
+  const issue = data.issues.find(i => i.word === word);
+  if (!issue) {
+    $("detail-sub").textContent = data.issues.length ? `「${word}」은(는) 오늘의 이슈 10개에 없어 기사 목록이 없습니다.` : "보여 줄 이슈가 없습니다.";
+    $("articles").replaceChildren();
+    $("issue-books-sub").textContent = "";
+    $("issue-books").replaceChildren();
+    return;
+  }
+  renderIssueBooks(issue);
+  $("detail-sub").textContent = `「${issue.word}」이(가) 제목에 들어간 기사 ${fmtNum(issue.article_count)}건 중 최신 ${issue.articles.length}건 · 언론사 ${issue.outlet_count}곳`;
+  $("articles").replaceChildren(...issue.articles.map(a => el("li", {},
+    safeLink(a.link, a.title),
+    el("div", { class: "muted", text: `${a.domain} · ${fmtTime(a.published)}` }))));
+}
+
+/* 관련 도서 (FR-31~33, FR-51, 10-31): 누를 때만 AI가 책을 제안하고, 서버가 도서관 정보나루·예스24에서
+   제목과 저자가 맞는 책만 남긴다. 화면의 책 정보는 API 결과뿐이다. 책마다 부산 소장 도서관 */
+const BOOKS_NOTE = "AI가 제안한 책 중 도서관 정보나루·예스24에서 제목과 저자가 확인된 책만 보여 줍니다. 소장 도서관은 도서관 정보나루";
+const issueBooks = {};  // 이슈 낱말 → 받은 결과(같은 이슈를 다시 열면 다시 부르지 않음)
+
+function bookItem(b) {
+  const meta = [b.author, b.publisher, b.loans !== undefined ? `대출 ${fmtNum(b.loans)}건` : "", b.source].filter(Boolean).join(" · ");
+  const busan = b.busan
+    ? (b.busan.count ? el("details", {}, el("summary", { text: `부산 공공도서관 ${b.busan.count}곳 소장` }),
+                          el("p", { text: b.busan.names.join(", ") }))
+                     : el("div", { class: "muted", text: "부산 공공도서관 소장 기록 없음" }))
+    : "";
+  return el("li", {}, safeLink(b.link, b.title), el("div", { class: "muted", text: meta }), busan);
+}
+
+// 돌려주는 값: {books} 또는 {error}
+async function fetchBooks(payload) {
+  try {
+    if (location.protocol === "file:") throw new Error("서버 없음");
+    const res = await fetch("api/books", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, model: chatPick.model }),
+    });
+    if ([404, 405, 501].includes(res.status)) throw new Error("서버 없음");
+    const out = await res.json();
+    return res.ok ? out : { error: out.error || "관련 도서를 찾지 못했습니다." };
+  } catch (err) {
+    return { error: err.message === "서버 없음" ? "관련 도서 찾기는 서버에서만 동작합니다. run.bat으로 실행해 주세요."
+                                              : "관련 도서를 찾지 못했습니다. 잠시 뒤 다시 눌러 주세요." };
+  }
+}
+
+function renderIssueBooks(issue) {
+  const word = issue.word, got = issueBooks[word];
+  const sub = (text, button) => $("issue-books-sub").replaceChildren(el("span", { text }), button ? " " : "", button ? findButton() : "");
+  const show = out => {
+    if (out.error) sub(out.error, true);  // 실패하면 다시 누를 수 있게
+    else sub(out.books.length ? BOOKS_NOTE : "AI가 제안한 책 중 도서관·서점 목록에서 확인된 책이 없습니다.");
+    $("issue-books").replaceChildren(...(out.books || []).map(bookItem));
+  };
+  const findButton = () => el("button", { type: "button", class: "more", text: "관련 도서 찾기", onclick: async () => {
+    sub("AI가 책을 제안하고 도서관·서점 목록에서 확인하는 중… (10초 안팎)");
+    const out = await fetchBooks({ issue: word });
+    if (!out.error) issueBooks[word] = out;
+    if ($("picker").querySelector('[aria-pressed="true"]')?.textContent === word) show(out);  // 기다리는 사이 다른 이슈를 열었으면 그리지 않는다
+  } });
+  $("issue-books").replaceChildren();
+  if (got) return show(got);
+  sub(`「${word}」을(를) 더 깊이 이해할 책을 찾아볼 수 있습니다. AI가 제안하고, 도서관·서점 목록에서 실제 있는 책인지 확인합니다.`, true);
+}
+
+/* 워드클라우드 (FR-20~FR-22, FR-24). 탭 1은 뉴스 미리보기, 탭 2는 뉴스·도서·종합 */
+const CLOUD_TEXT = {
+  news: () => `뉴스 제목의 명사, 크기 = 언론사 수 × 평소 흔함 보정 · 상위 ${data.clouds.news.length}개`,
+  books: () => data.books
+    ? `예스24 베스트셀러 ${data.books.items.length}권(${fmtDate(data.books.pub_date)} 기준)의 제목과 책 소개, 크기 = 나온 책 수 (수험서 제외)`
+    : "예스24 데이터를 받지 못했습니다.",
+  combined: () => "뉴스와 도서 점수를 각각 가장 큰 값으로 나눠 0~1로 맞춘 뒤 더한 값",
+};
+const CLOUD_VALUE = { news: v => `점수 ${v}`, books: v => `책 ${v}권`, combined: v => `종합 ${v}` };
+// 단어를 누르면 AI 도우미에 그 단어로 묻는다(FR-24, 10-30)
+const CLOUD_HINT = "단어를 누르면 AI 도우미가 그 단어로 답합니다. 마우스를 올리면 점수가 보입니다.";
+const clouds = {
+  preview: { canvas: "cloud-preview", info: "preview-info", kind: "news", width: 0, limit: 50 },  // 미리보기는 상위 50개만
+  main: { canvas: "cloud-main", info: "cloud-info", kind: "news", width: 0, limit: 0 },
+};
+let fontReady = false;
+
+function renderCloudTabs() {
+  for (const t of document.querySelectorAll("#cloud-tabs button")) {
+    t.addEventListener("click", () => { clouds.main.kind = t.dataset.cloud; drawCloud(clouds.main); });
+  }
+  $("preview-sub").textContent = CLOUD_TEXT.news().replace(/상위 \d+개$/, `상위 ${Math.min(clouds.preview.limit, data.clouds.news.length)}개`);
+  // 글꼴을 먼저 읽어야 캔버스에 한글이 나눔고딕으로 그려진다
+  document.fonts.load('20px "NanumGothic"').finally(() => { fontReady = true; drawVisibleClouds(); });
+  let timer;
+  window.addEventListener("resize", () => { clearTimeout(timer); timer = setTimeout(drawVisibleClouds, 250); });
+}
+
+// 숨은 탭의 캔버스는 폭이 0이라, 보이는 것만 그리고 폭이 바뀌었을 때만 다시 그린다
+function drawVisibleClouds(force) {
+  if (!fontReady) return;
+  for (const c of Object.values(clouds)) {
+    const canvas = $(c.canvas);
+    if (canvas.clientWidth && (force || canvas.clientWidth !== c.width)) drawCloud(c);
+  }
+}
+
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${alpha.toFixed(2)})`;
+}
+
+function drawCloud(c) {
+  const kind = c.kind, info = $(c.info), canvas = $(c.canvas);
+  const list = (data.clouds[kind] || []).slice(0, c.limit || undefined);
+  if (c === clouds.main) {
+    for (const t of document.querySelectorAll("#cloud-tabs button")) t.setAttribute("aria-selected", String(t.dataset.cloud === kind));
+    $("cloud-sub").textContent = CLOUD_TEXT[kind]();
+  }
+  info.textContent = CLOUD_HINT;
+
+  const dpr = window.devicePixelRatio || 1;
+  c.width = canvas.clientWidth;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  if (!list.length || !window.WordCloud) {
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    info.textContent = window.WordCloud ? "이번에는 이 데이터를 받지 못했습니다." : "워드클라우드 라이브러리를 읽지 못했습니다.";
+    return;
+  }
+
+  // 가장 큰 단어가 캔버스 높이의 약 1/6이 되도록, 크기는 제곱근으로 줄여 작은 단어도 읽히게 한다
+  const max = list[0][1], big = Math.min(canvas.width / 10, canvas.height / 6), small = 11 * dpr;
+  const style = getComputedStyle(document.documentElement);
+  const palette = ["--news", "--books", "--combined", "--warm"].map(v => style.getPropertyValue(v).trim());
+  palette.unshift(style.getPropertyValue(`--${kind}`).trim());  // 탭 색이 가장 많이 나오게
+  WordCloud(canvas, {
+    list,
+    fontFamily: '"NanumGothic", sans-serif',
+    weightFactor: v => small + (big - small) * Math.sqrt(v / max),
+    // 붙은 단어가 구분되게 단어마다 색을 돌려 쓰고, 작은 단어는 옅게(캔버스는 color-mix를 못 읽는 브라우저가 있어 rgba로)
+    color: (word, v) => hexToRgba(palette[[...word].reduce((h, ch) => h + ch.charCodeAt(0), 0) % palette.length],
+                                  Math.min(1, 0.55 + 1.2 * v / max)),
+    backgroundColor: "rgba(0,0,0,0)",
+    gridSize: Math.round(10 * dpr),  // 단어 사이 여백
+    rotateRatio: 0,
+    shrinkToFit: true,
+    drawOutOfBound: false,
+    hover: item => { if (item) info.textContent = `${item[0]} · ${CLOUD_VALUE[kind](item[1])}`; },
+    // 휴대폰은 마우스 올리기가 없어 누를 때도 점수를 보여 준다
+    click: item => { info.textContent = `${item[0]} · ${CLOUD_VALUE[kind](item[1])}`; askAbout(item[0]); },
+  });
+}
+
+/* AI 도우미 (FR-50, FR-24). 질문은 같은 주소의 /api/chat으로만 보낸다(NFR-07) */
+let chatBusy = false;
+
+// 고를 수 있는 모델과 생각 수준(서버 core/config.py의 CHAT_MODELS, CHAT_THINKING과 같게). 서버가 다시 걸러 낸다
+const MODELS = [
+  { id: "gemini-3.5-flash", name: "3.5 Flash", desc: "기본 · 빠름(보통 2~7초)" },
+  { id: "gemini-3.7-flash", name: "3.7 Flash", desc: "최신 · 혼잡하면 느림" },
+  { id: "gemini-3.8-flash", name: "3.8 Flash", desc: "가장 최신 · 혼잡하면 느림" },
+];
+const THINKING = [{ id: "low", name: "낮음" }, { id: "medium", name: "중간" }];
+const MODEL_NAME = { "gemini-3.5-flash-lite": "3.5 Flash Lite" };
+for (const m of MODELS) MODEL_NAME[m.id] = m.name;
+const chatPick = { model: MODELS[0].id, thinking: THINKING[0].id };
+
+// 고른 값은 이 브라우저에만 기억한다(막혀 있으면 기본값)
+try {
+  const saved = JSON.parse(localStorage.getItem("trandeer-chat-pick") || "{}");
+  if (MODELS.some(m => m.id === saved.model)) chatPick.model = saved.model;
+  if (THINKING.some(t => t.id === saved.thinking)) chatPick.thinking = saved.thinking;
+} catch (e) { /* 저장소를 못 쓰면 기본값 */ }
+
+function renderChat() {
+  $("chat-form").addEventListener("submit", e => { e.preventDefault(); askChat($("chat-input").value); });
+  $("model-btn").addEventListener("click", () => toggleModelMenu());
+  // 메뉴 안 버튼은 누르면 다시 그려져 문서에서 빠지므로, 누른 순간의 경로로 바깥인지 본다
+  document.addEventListener("click", e => { if (!e.composedPath().includes($("chat-form"))) toggleModelMenu(false); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") toggleModelMenu(false); });
+  renderModelPicker();
+}
+
+function renderModelPicker() {
+  const model = MODELS.find(m => m.id === chatPick.model);
+  const think = THINKING.find(t => t.id === chatPick.thinking);
+  $("model-btn").textContent = `${model.name} · ${think.name} ▾`;
+  $("model-btn").setAttribute("aria-label", `모델 ${model.name}, 생각 수준 ${think.name}. 바꾸려면 누르세요`);
+  const pick = (key, value) => {
+    chatPick[key] = value;
+    try { localStorage.setItem("trandeer-chat-pick", JSON.stringify(chatPick)); } catch (e) { /* 기억 못 해도 이번에는 적용 */ }
+    renderModelPicker();
+  };
+  $("model-menu").replaceChildren(
+    el("h3", { text: "모델" }),
+    ...MODELS.map(m => el("button", { type: "button", class: "opt", role: "menuitemradio", "aria-checked": String(m.id === chatPick.model),
+        onclick: () => { pick("model", m.id); toggleModelMenu(false); } },
+      el("span", { text: m.name }), el("span", { class: "check", text: m.id === chatPick.model ? "✓" : "" }),
+      el("small", { text: m.desc }))),
+    el("hr"),
+    el("h3", { text: "생각 수준" }),
+    el("div", { class: "seg" }, ...THINKING.map(t => el("button", { type: "button", "aria-pressed": String(t.id === chatPick.thinking),
+      text: t.name, onclick: () => pick("thinking", t.id) }))),
+  );
+}
+
+function toggleModelMenu(open) {
+  const menu = $("model-menu");
+  open = open === undefined ? menu.hidden : open;
+  menu.hidden = !open;
+  $("model-btn").setAttribute("aria-expanded", String(open));
+}
+
+function askAbout(word) {
+  if (location.hash.split("/")[0] !== "#explore") { location.hash = "explore"; route(); }  // 탭을 먼저 보여야 스크롤된다
+  $("chat").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  askChat(`「${word}」 관련해서 오늘 무슨 일이 있었어?`);
+}
+
+function addMsg(cls, ...children) {
+  const node = el("div", { class: `msg ${cls}` }, ...children);
+  $("chat-log").append(node);
+  $("chat-log").scrollTop = $("chat-log").scrollHeight;
+  return node;
+}
+
+async function askChat(question) {
+  question = question.trim();
+  if (!question || chatBusy) return;
+  chatBusy = true;
+  $("chat-send").disabled = true;
+  $("chat-input").value = "";
+  addMsg("q", question);
+  const wait = addMsg("a wait", "답을 만드는 중…");
+  const asked = chatPick.model;  // 기다리는 사이 메뉴에서 바꿔도 이 질문에 쓴 모델로 적는다
+  try {
+    if (location.protocol === "file:") throw new Error("서버 없음");
+    const res = await fetch("api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, ...chatPick }),
+    });
+    // 단순 파일 서버(python -m http.server 등)는 POST를 받지 않아 501·404가 온다
+    if ([404, 405, 501].includes(res.status)) throw new Error("서버 없음");
+    const out = await res.json();
+    if (!res.ok) { wait.className = "msg a fail"; wait.textContent = out.error || "답을 받지 못했습니다."; return; }
+    const children = [];
+    // 관련 도서(FR-51, 10-31): 답과 함께 책을 붙이지 않고, 찾아볼 수 있다는 안내를 첫 줄에 둔다. 누르면 /api/books
+    if (!out.insufficient && !out.loans) {
+      const hint = el("div", { class: "book-hint" }, el("span", { text: "이 주제의 관련 도서도 찾아볼 수 있습니다." }));
+      const btn = el("button", { type: "button", class: "more", text: "관련 도서 찾기", onclick: async () => {
+        btn.disabled = true;
+        hint.replaceChildren(el("span", { class: "muted", text: "AI가 책을 제안하고 도서관·서점 목록에서 확인하는 중…" }));
+        const r = await fetchBooks({ question, answer: out.answer });
+        hint.replaceChildren(
+          el("div", { class: "msg-h", text: r.error ? "관련 도서" : (r.books.length ? `관련 도서 · ${BOOKS_NOTE}` : "관련 도서") }),
+          r.books && r.books.length ? el("ul", { class: "rows" }, ...r.books.map(bookItem))
+            : el("div", { class: "muted", text: r.error || "AI가 제안한 책 중 도서관·서점 목록에서 확인된 책이 없습니다." }));
+      } });
+      hint.append(btn);
+      children.push(hint);
+    }
+    children.push(el("div", { text: out.answer }));
+    if (out.sources && out.sources.length) {
+      children.push(el("div", { class: "msg-h", text: "근거 기사" }));
+      children.push(el("ol", {}, ...out.sources.map(s => el("li", {}, safeLink(s.link, s.title),
+        el("span", { class: "muted", text: ` · ${s.domain}` })))));
+    }
+    // 답에서 말한 화면 목록의 책(예스24·정보나루 상세 링크)
+    if (out.books && out.books.length) {
+      children.push(el("div", { class: "msg-h", text: "답에 나온 책" }),
+        el("ol", {}, ...out.books.map(b => el("li", {}, safeLink(b.link, b.title),
+          el("span", { class: "muted", text: ` · ${b.author} · ${b.source}` })))));
+    }
+    // 도서관 조건 질문(FR-52): AI가 뽑은 조건으로 정보나루 인기 대출을 부른 결과. AI는 책을 고르지 않는다
+    if (out.loans) {
+      const L = out.loans;
+      children.push(el("div", { class: "msg-h", text: L.error ? "도서관 인기 대출"
+        : `도서관 인기 대출 · ${(L.conditions || []).join(" · ") || "전국 전체"} · ${fmtDate(L.start)}~${fmtDate(L.end)}, 도서관 정보나루` }));
+      children.push(L.books && L.books.length
+        ? el("ol", {}, ...L.books.map(b => el("li", {}, safeLink(b.link, b.title),
+            el("span", { class: "muted", text: ` · ${b.author} · 대출 ${fmtNum(b.loans)}건` }))))
+        : el("div", { class: "muted", text: L.error ? "도서관 목록을 불러오지 못했습니다." : "이 조건의 대출 기록이 없습니다." }));
+    }
+    // 실제로 답한 모델(혼잡해서 대체 모델이 답했으면 그렇게 적는다)
+    const used = MODEL_NAME[out.model] || out.model, think = (THINKING.find(t => t.id === out.thinking) || {}).name || "";
+    children.push(el("div", { class: "meta", text: out.fallback
+      ? `${MODEL_NAME[asked]} 혼잡으로 ${used}가 대신 답함 · 생각 ${think}`
+      : `${used} · 생각 ${think}` }));
+    wait.className = "msg a";
+    wait.replaceChildren(...children);
+  } catch (err) {
+    wait.className = "msg a fail";
+    wait.textContent = err.message === "서버 없음"
+      ? "AI 도우미는 서버에서만 동작합니다. run.bat으로 실행해 주세요."
+      : "AI 도우미에 연결하지 못했습니다. 잠시 뒤 다시 물어 주세요.";
+  } finally {
+    chatBusy = false;
+    $("chat-send").disabled = false;
+    $("chat-log").scrollTop = $("chat-log").scrollHeight;
+  }
+}
+
+/* 공통 키워드 (FR-23) */
+function renderCommon() {
+  const words = data.common || [];
+  $("common").replaceChildren(...(words.length ? words.map(w => el("span", { text: w })) : [el("p", { class: "muted", text: "없음" })]));
+}
+
+/* 서점 베스트셀러와 도서관 인기 대출 (FR-02, FR-40, FR-41). 10권을 보이고 「더 보기」로 전부 */
+function renderBookList(id, items, title, meta) {
+  let shown = 10;
+  const draw = () => {
+    $(id).replaceChildren(...items.slice(0, shown).map(x => el("li", {},
+      el("span", { class: "rank", text: x.rank }),
+      el("span", {}, safeLink(x.link, title(x)), el("div", { class: "muted", text: meta(x).filter(Boolean).join(" · ") })))));
+    $(`${id}-more`).hidden = shown >= items.length;
+  };
+  $(`${id}-more`).onclick = () => { shown = items.length; draw(); };
+  draw();
+}
+
+function renderBooks() {
+  const b = data.books, l = data.library;
+  $("books-sub").textContent = b ? `출처 예스24 · ${fmtDate(b.pub_date)} 기준 · 상위 ${b.items.length}권` : "이번에는 예스24 데이터를 받지 못했습니다.";
+  if (b) renderBookList("books", b.items, x => x.title, x => [x.author, x.publisher, x.sort]);
+  $("library-sub").textContent = l
+    ? `출처 도서관 정보나루 · 전국 공공도서관 ${fmtDate(l.start)}~${fmtDate(l.end)} 대출 · 같은 제목 여러 권은 한 줄로`
+    : "이번에는 도서관 정보나루 데이터를 받지 못했습니다.";
+  if (l) renderBookList("library", l.items, x => (x.volumes > 1 ? `${x.title} (외 ${x.volumes - 1}권)` : x.title),
+                        x => [x.author, `대출 ${fmtNum(x.loans)}건`, (x.subject || "").split(" > ")[0]]);
+}
+
+/* 산정 기준 (FR-13) */
+function renderMethod() {
+  const m = data.method, n = data.news || {};
+  const body = [];
+  const h = t => el("h3", { text: t });
+  const p = t => el("p", { text: t });
+
+  body.push(h("수집"));
+  body.push(p(`네이버 뉴스에서 검색어 ${m.queries.length}개(${m.queries.join(", ")})로 최신순 기사를 받아, 최근 ${m.target_hours}시간치를 30분마다 쌓습니다. `
+    + `검색어마다 한 번에 최대 1,000건까지만 받을 수 있어 낮에는 한 번 수집이 1~2시간만 덮기 때문입니다.`));
+  if (n.collected_at) {
+    body.push(p(`이번 수집 ${fmtTime(n.collected_at)} · 최근 ${m.target_hours}시간 중 ${n.covered_hours}시간 덮음 · 기사 ${fmtNum(n.article_count)}건 · 언론사 ${fmtNum(n.outlet_count)}곳`
+      + ((n.gaps || []).length ? ` · 수집 못 한 구간 ${n.gaps.map(([a, b]) => `${fmtHM(a)}~${fmtHM(b)}`).join(", ")}` : " · 빈 구간 없음")));
+    const rows = (n.last_build && n.last_build.per_query) || [];
+    if (rows.length) {
+      body.push(el("div", { class: "table-scroll" }, el("table", {},
+        el("thead", {}, el("tr", {}, ...["검색어", "받은 기사", "덮은 시간"].map(t => el("th", { text: t })))),
+        el("tbody", {}, ...rows.map(r => el("tr", {},
+          el("td", { text: r["검색어"] }), el("td", { text: `${fmtNum(r["받은 건수"])}건` }), el("td", { text: `${r["덮은 시간"]}시간` })))))));
+      body.push(el("p", { class: "muted", text: "이번 수집 1회 기준. 같은 기사가 여러 검색어에 나오면 원문 링크로 하나만 남깁니다." }));
+    }
+  }
+
+  body.push(h("오늘의 이슈 점수"));
+  body.push(p(`${m.issue_formula}. N은 ${fmtNum(m.idf_n)}입니다.`));
+  body.push(el("ul", {},
+    el("li", { text: "한 언론사가 같은 단어를 여러 번 써도 한 번으로 셉니다. 많이 찍어 내는 곳이 순위를 좌우하지 않게 하려고." }),
+    el("li", { text: "네이버 뉴스 전체에서 평소 드문 단어일수록 점수가 커집니다. 그래서 늘 나오는 말보다 오늘 갑자기 많이 나온 이름이 올라옵니다." }),
+    el("li", { text: `고유명사와 영문 약어만 후보로 하고 나라·광역 지명은 뺍니다. 언론사 ${m.issue_min_outlets}곳 이상이 쓴 단어만 올립니다.` })));
+
+  body.push(h("워드클라우드 점수"));
+  body.push(p(`뉴스: ${m.cloud_formula}. 도서: 예스24 베스트셀러 제목과 책 소개에 그 단어가 나온 책 수(${m.book_excluded_sorts.join(", ")} 제외). 종합: 두 점수를 각각 0~1로 맞춰 더합니다.`));
+
+  body.push(h("평소에 흔한 단어"));
+  body.push(p(`네이버 뉴스 전체 건수가 ${fmtNum(m.generic_total)}건 이상인 단어는 늘 쓰는 말로 보고 뺍니다. `
+    + `다만 평소보다 ${m.rescue_lift}배 이상 많이 나왔으면 다시 넣습니다(배율 = 언론사 수 ÷ 전체 건수를 흔한 단어들의 중앙값과 비교).`));
+  body.push(el("p", { class: "wordlist", text: `뺀 단어 ${m.generic_excluded.length}개: ${m.generic_excluded.join(", ")}` }));
+  body.push(el("p", { class: "wordlist", text: m.generic_rescued.length
+    ? `다시 넣은 단어: ${m.generic_rescued.map(([w, x]) => `${w}(${x}배)`).join(", ")}` : "다시 넣은 단어: 없음" }));
+
+  if (data.library) {
+    body.push(h("도서관 인기 대출"));
+    body.push(p(`도서관 정보나루의 전국 공공도서관 대출 기록에서 ${fmtDate(data.library.start)}~${fmtDate(data.library.end)} 동안 많이 빌린 책입니다. `
+      + "성별·연령·지역·주제로 거르지 않고 전체를 씁니다. 시리즈처럼 같은 제목이 여러 권이면 가장 많이 빌린 한 권의 순위에 한 줄로 묶습니다(대출 건수는 그 한 권의 것). "
+      + "하루 한 번 받습니다. 도서 키워드와 워드클라우드에는 아직 넣지 않았습니다."));
+  }
+
+  body.push(h("불용어"));
+  body.push(el("ul", {}, ...Object.entries(m.stopwords).map(([g, ws]) =>
+    el("li", {}, el("b", { text: `${g}: ` }), el("span", { class: "wordlist", text: ws.join(", ") })))));
+  body.push(el("p", { class: "muted", text: "지명은 오늘의 이슈에서만 뺍니다. 이 목록은 결과를 보며 늘리고, 늘린 날짜를 작업기록에 남깁니다." }));
+
+  $("method-body").replaceChildren(...body);
+}
+</script>
+</body>
+</html>
