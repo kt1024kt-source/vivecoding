@@ -82,10 +82,14 @@ def _read_env_file():
 
 
 def get_key(name):
-    """키 값을 돌려준다. 없으면 이름만 담아 KeyError를 낸다."""
+    """키 값을 돌려준다. 없으면 이름만 담아 KeyError를 낸다.
+
+    앞뒤 공백과 줄바꿈은 지운다(11-01: Secrets에 붙여 넣은 값 끝의 줄바꿈 때문에 네이버 헤더가 InvalidHeader로 실패함).
+    """
     for source in (os.environ, _read_env_file()):
-        if source.get(name):
-            return source[name]
+        value = (source.get(name) or "").strip()
+        if value:
+            return value
     raise KeyError(f"키가 없습니다: {name}")
 
 

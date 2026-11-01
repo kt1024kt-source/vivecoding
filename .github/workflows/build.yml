@@ -30,10 +30,10 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: 뉴스 누적 파일 받기 (store/)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: store
-          key: store-${{ github.run_id }}
+          key: store-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: store-
 
       - name: 빌드
@@ -46,10 +46,10 @@ jobs:
 
       - name: 뉴스 누적 파일 남기기 (store/)
         if: always() && hashFiles('store/**') != ''
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: store
-          key: store-${{ github.run_id }}
+          key: store-${{ github.run_id }}-${{ github.run_attempt }}  # 다시 실행(Re-run)해도 이름이 겹치지 않게 시도 번호까지
 
       - name: 배포 폴더 만들기 (이슈가 비면 여기서 멈춤)
         run: python deploy/make_bundle.py
