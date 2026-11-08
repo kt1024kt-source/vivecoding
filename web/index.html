@@ -39,7 +39,6 @@
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip { background: var(--card); border: 1px solid rgba(20, 33, 13, .18); border-radius: 999px; padding: 3px 12px; font-size: .85rem; }
   .chip b { font-weight: normal; color: var(--muted); margin-right: 4px; }
-  .chip.notice { background: var(--brand-text); border-color: transparent; color: #fff; }
   .errors:empty { display: none; }
   .errors p { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: .9rem; }
 
@@ -359,7 +358,6 @@ function renderHeader() {
   if (n.collected_at) chips.push(chip("뉴스 수집", fmtTime(n.collected_at)));
   if (b) chips.push(chip("예스24", `${fmtDate(b.pub_date)} 기준`));
   if (data.library) chips.push(chip("도서관 대출", `${fmtDate(data.library.start)}~${fmtDate(data.library.end)}`));
-  chips.push(el("a", { class: "chip notice", href: "#method", text: "개인화하지 않습니다 · 산정 기준 보기" }));
   $("chips").replaceChildren(...chips);
   $("errors").replaceChildren(...(data.errors || []).map(e => el("p", { text: `일부 데이터를 새로 받지 못했습니다: ${e}` })));
 }
