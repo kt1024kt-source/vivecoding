@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>trandeer</title>
+<link rel="icon" href="favicon.png">
 <!--
-  PRD 7장 화면. 탭 3개: 오늘(#today) / 살펴보기(#explore) / 산정 기준(#method). 10-29 작업자 요청으로 한 페이지에서 탭으로 나눔.
+  PRD 7장 화면. 탭 4개: 모아보기(#home) / 오늘의 이슈(#issues) / 도서(#books) / 산정 기준(#method). 10-29 작업자 요청으로 한 페이지에서 탭으로 나눔,
+  11-08 작업자 요청으로 탭 구성을 바꾸고 흰 바탕 + 밝은 녹색(로고 색) 머리말·카드 제목으로. 다크 모드는 없앰(시연 노트북 설정과 상관없이 같은 화면).
   data.json만 읽고 외부 API는 부르지 않는다(NFR-07).
   워드클라우드는 web/vendor/wordcloud2.js(1.2.2, MIT)를 내려받아 쓴다. 시연 때 CDN이 막혀도 돌게 하려고.
   data.json의 글자(기사 제목 등)는 모두 textContent로 넣어 HTML로 해석되지 않게 한다.
@@ -14,18 +16,11 @@
   @font-face { font-family: "NanumGothic"; src: url("fonts/NanumGothic-Regular.ttf") format("truetype"); font-display: swap; }
 
   :root {
-    --bg: #f3f5f9; --card: #ffffff; --text: #1d2433; --muted: #667085; --line: #e4e7ec;
-    --accent: #2f6fed; --accent-soft: #e8f0fe; --warn: #b42318; --warn-soft: #fef3f2;
-    --news: #2f6fed; --books: #0e9384; --combined: #7a5af8; --warm: #e04f16;
-    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #0f1420; --card: #171e2c; --text: #e6e9ef; --muted: #98a2b3; --line: #2a3345;
-      --accent: #6c9cff; --accent-soft: #1e2a44; --warn: #f97066; --warn-soft: #3a1d1b;
-      --news: #6c9cff; --books: #3cc9b4; --combined: #a48afb; --warm: #fd853a;
-      --shadow: none;
-    }
+    color-scheme: light;
+    --bg: #ffffff; --card: #ffffff; --text: #1d2433; --muted: #667085; --line: #d0d5dd; --soft: #f5f7f4;
+    --brand: #98e761; --brand-text: #14210d;  /* 로고 녹색(원본 로고에서 뽑음)과 그 위 글자색 */
+    --accent: #2e7d1f; --accent-soft: #eaf8e0; --warn: #b42318; --warn-soft: #fef3f2;
+    --news: #2f6fed; --books: #0e9384; --combined: #7a5af8; --warm: #e04f16;  /* 워드클라우드는 구분되게 그대로 */
   }
 
   * { box-sizing: border-box; }
@@ -36,37 +31,38 @@
   .muted { color: var(--muted); font-size: .88rem; }
   button { font: inherit; color: inherit; }
 
-  /* 머리말 */
-  header { padding: 28px 0 4px; }
-  .brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .brand h1 { margin: 0; font-size: 1.9rem; letter-spacing: -.02em; }
-  .brand p { margin: 0; color: var(--muted); }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  .chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: .85rem; }
+  /* 머리말: 밝은 녹색 띠 안에 검은 로고와 기준 시각 */
+  .top { background: var(--brand); color: var(--brand-text); }
+  header { padding: 14px 0 6px; display: flex; align-items: center; gap: 8px 24px; flex-wrap: wrap; }
+  header h1 { margin: 0; line-height: 0; }
+  header h1 img { height: 72px; width: auto; display: block; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--card); border: 1px solid rgba(20, 33, 13, .18); border-radius: 999px; padding: 3px 12px; font-size: .85rem; }
   .chip b { font-weight: normal; color: var(--muted); margin-right: 4px; }
-  .chip.notice { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .chip.notice { background: var(--brand-text); border-color: transparent; color: #fff; }
+  .errors:empty { display: none; }
   .errors p { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: .9rem; }
 
-  /* 탭 막대: 화면을 내려도 위에 붙어 있다 */
-  nav.tabbar { position: sticky; top: 0; z-index: 5; background: var(--bg); margin-top: 12px; border-bottom: 1px solid var(--line); }
-  nav.tabbar .wrap { display: flex; gap: 4px; overflow-x: auto; }
-  nav.tabbar a { padding: 12px 16px 10px; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
-  nav.tabbar a:hover { text-decoration: none; color: var(--text); }
-  nav.tabbar a[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: bold; }
+  /* 탭 막대: 녹색 띠의 아래쪽. 고른 탭은 흰 칸으로 띄워 아래 흰 바탕과 잇는다. 화면을 내려도 위에 붙어 있다 */
+  nav.tabbar { position: sticky; top: 0; z-index: 5; background: var(--brand); border-bottom: 1px solid var(--line); }
+  nav.tabbar .wrap { display: flex; gap: 4px; overflow-x: auto; padding-top: 6px; }
+  nav.tabbar a { padding: 9px 18px 8px; color: var(--brand-text); border-radius: 10px 10px 0 0; white-space: nowrap; margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0; }
+  nav.tabbar a:hover { text-decoration: none; background: rgba(255, 255, 255, .45); }
+  nav.tabbar a[aria-selected="true"] { background: var(--bg); border-color: var(--line); font-weight: bold; }
 
   /* 카드 배치 */
   .panel { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; padding: 16px 0 8px; }
   .panel[hidden] { display: none; }
-  .card { grid-column: span 12; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; }
+  /* 카드: 제목 칸은 밝은 녹색, 내용은 흰색, 바깥은 테두리(11-08) */
+  .card { grid-column: span 12; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 0 20px 18px; min-width: 0; overflow: hidden; }
   .w7 { grid-column: span 7; } .w6 { grid-column: span 6; } .w5 { grid-column: span 5; }
   @media (max-width: 820px) { .w7, .w6, .w5 { grid-column: span 12; } }
-  .card h2 { margin: 0 0 2px; font-size: 1.15rem; }
+  .card > h2 { margin: 0 -20px 12px; padding: 9px 20px; font-size: 1.1rem; background: var(--brand); color: var(--brand-text); }
+  .card > h2 .muted { color: rgba(20, 33, 13, .7); }
   .card .sub { margin: 0 0 14px; }
-  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 
-  /* 오늘의 이슈: 넓은 화면에서는 2열(1~5, 6~10) */
-  #issues { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-template-rows: repeat(5, auto); grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
-  @media (max-width: 820px) { #issues { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } }
+  /* 오늘의 이슈: 이슈 상세 옆 좁은 칸이라 1열 */
+  #issues { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
   #issues li button {
     width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px;
     padding: 8px 10px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer;
@@ -114,7 +110,7 @@
   .tags span { background: var(--accent-soft); color: var(--accent); padding: 4px 12px; border-radius: 999px; }
 
   /* AI 도우미 (FR-50) */
-  .chat-log { background: var(--bg); border-radius: 10px; padding: 12px 14px; font-size: .92rem; max-height: 460px; overflow-y: auto; }
+  .chat-log { background: var(--soft); border-radius: 10px; padding: 12px 14px; font-size: .92rem; max-height: 460px; overflow-y: auto; }
   .chat-log p { margin: 0 0 6px; }
   .msg { margin: 0 0 12px; }
   .msg.q { margin-left: 18%; background: var(--accent-soft); color: var(--text); padding: 8px 12px; border-radius: 12px 12px 2px 12px; }
@@ -143,7 +139,7 @@
   .model-menu .opt small { grid-column: 1; color: var(--muted); font-size: .76rem; }
   .model-menu .opt .check { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--accent); }
   .model-menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
-  .seg { display: flex; gap: 4px; margin: 2px 8px 6px; background: var(--bg); border-radius: 8px; padding: 3px; }
+  .seg { display: flex; gap: 4px; margin: 2px 8px 6px; background: var(--soft); border-radius: 8px; padding: 3px; }
   .seg button { flex: 1; background: none; border: 0; border-radius: 6px; padding: 5px 0; color: var(--muted); font: inherit; font-size: .84rem; cursor: pointer; }
   .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
 
@@ -162,70 +158,29 @@
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand">
-      <h1>trandeer</h1>
-      <p>알고리즘 추천 없이, 모두에게 같은 기준으로 고른 오늘의 사회 이슈</p>
-    </div>
-    <div class="chips" id="chips"><span class="chip">data.json 읽는 중…</span></div>
+<div class="top">
+  <div class="wrap">
+    <header>
+      <h1><img src="logo.png" alt="trandeer"></h1>
+      <div class="chips" id="chips"><span class="chip">data.json 읽는 중…</span></div>
+    </header>
     <div class="errors" id="errors"></div>
-  </header>
+  </div>
 </div>
 
 <nav class="tabbar">
   <div class="wrap" role="tablist">
-    <a role="tab" href="#today" data-tab="today">오늘</a>
-    <a role="tab" href="#explore" data-tab="explore">살펴보기</a>
-    <a role="tab" href="#google" data-tab="google">구글 검색어</a>
+    <a role="tab" href="#home" data-tab="home">모아보기</a>
+    <a role="tab" href="#issues" data-tab="issues">오늘의 이슈</a>
+    <a role="tab" href="#books" data-tab="books">도서</a>
     <a role="tab" href="#method" data-tab="method">산정 기준</a>
   </div>
 </nav>
 
 <div class="wrap">
-  <!-- 탭 1: 오늘 -->
-  <main class="panel" id="tab-today" role="tabpanel">
-    <section class="card">
-      <h2>오늘의 이슈</h2>
-      <p class="sub muted" id="issues-sub"></p>
-      <ol id="issues"></ol>
-    </section>
-
-    <!-- 서점 vs 도서관(FR-41): 사는 책과 빌리는 책을 나란히 -->
-    <section class="card w6">
-      <h2>서점 베스트셀러 <span class="muted">· 예스24</span></h2>
-      <p class="sub muted" id="books-sub"></p>
-      <ol class="rows books" id="books"></ol>
-      <button class="more" id="books-more" hidden>더 보기</button>
-    </section>
-
-    <section class="card w6">
-      <h2>도서관 인기 대출 <span class="muted">· 도서관 정보나루</span></h2>
-      <p class="sub muted" id="library-sub"></p>
-      <ol class="rows books" id="library"></ol>
-      <button class="more" id="library-more" hidden>더 보기</button>
-    </section>
-
-    <section class="card">
-      <h2>공통 키워드</h2>
-      <p class="sub muted">뉴스와 도서 양쪽 상위 키워드에 모두 나온 단어</p>
-      <div class="tags" id="common"></div>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>뉴스 워드클라우드</h2>
-        <a href="#explore">도서·종합 워드클라우드는 살펴보기에서 →</a>
-      </div>
-      <p class="sub muted" id="preview-sub"></p>
-      <div class="cloud-box wide"><canvas id="cloud-preview" aria-label="뉴스 워드클라우드"></canvas></div>
-      <p class="muted cloud-info" id="preview-info"></p>
-    </section>
-  </main>
-
-  <!-- 탭 2: 살펴보기 -->
-  <main class="panel" id="tab-explore" role="tabpanel" hidden>
-    <section class="card">
+  <!-- 탭 1: 모아보기(워드클라우드 + AI 도우미 + 공통 키워드) -->
+  <main class="panel" id="tab-home" role="tabpanel">
+    <section class="card w7">
       <h2>워드클라우드</h2>
       <p class="sub muted" id="cloud-sub"></p>
       <div class="cloud-tabs" id="cloud-tabs">
@@ -233,18 +188,8 @@
         <button data-cloud="books" style="--tab: var(--books)">도서</button>
         <button data-cloud="combined" style="--tab: var(--combined)">종합</button>
       </div>
-      <div class="cloud-box wide"><canvas id="cloud-main" aria-label="워드클라우드"></canvas></div>
+      <div class="cloud-box"><canvas id="cloud-main" aria-label="워드클라우드"></canvas></div>
       <p class="muted cloud-info" id="cloud-info"></p>
-    </section>
-
-    <section class="card w7" id="detail">
-      <h2>이슈 상세</h2>
-      <p class="sub muted" id="detail-sub"></p>
-      <div class="picker" id="picker"></div>
-      <ul class="rows" id="articles"></ul>
-      <h3 class="detail-h">관련 도서</h3>
-      <p class="sub muted" id="issue-books-sub"></p>
-      <ul class="rows" id="issue-books"></ul>
     </section>
 
     <section class="card w5" id="chat">
@@ -262,19 +207,59 @@
       </form>
       <p class="chat-note muted">질문은 Google Gemini로 전송되며 서비스 개선에 쓰일 수 있습니다. 개인정보는 넣지 마세요.</p>
     </section>
+
+    <section class="card">
+      <h2>공통 키워드</h2>
+      <p class="sub muted">뉴스와 도서 양쪽 상위 키워드에 모두 나온 단어</p>
+      <div class="tags" id="common"></div>
+    </section>
   </main>
 
-  <!-- 탭: 구글 검색어(11-08). 보여 주기만 하고 이슈·워드클라우드·AI 도우미에는 쓰지 않는다 -->
-  <main class="panel" id="tab-google" role="tabpanel" hidden>
+  <!-- 탭 2: 오늘의 이슈(이슈 목록 + 이슈 상세 + 구글 검색어) -->
+  <main class="panel" id="tab-issues" role="tabpanel" hidden>
+    <section class="card w5">
+      <h2>오늘의 이슈</h2>
+      <p class="sub muted" id="issues-sub"></p>
+      <ol id="issues"></ol>
+    </section>
+
+    <section class="card w7" id="detail">
+      <h2>이슈 상세</h2>
+      <p class="sub muted" id="detail-sub"></p>
+      <div class="picker" id="picker"></div>
+      <ul class="rows" id="articles"></ul>
+      <h3 class="detail-h">관련 도서</h3>
+      <p class="sub muted" id="issue-books-sub"></p>
+      <ul class="rows" id="issue-books"></ul>
+    </section>
+
+    <!-- 구글 검색어(11-08). 보여 주기만 하고 이슈·워드클라우드·AI 도우미에는 쓰지 않는다 -->
     <section class="card">
       <h2>구글 인기 급상승 검색어 <span class="muted">· Google 트렌드</span></h2>
       <p class="sub muted" id="google-sub"></p>
       <ol class="rows gtrends" id="google"></ol>
-      <p class="sub muted">Google 트렌드의 한국 인기 급상승 검색어를 걸러 내지 않고 그대로 보여 줍니다. 전체 검색량 순위가 아니라 최근 검색이 크게 는 검색어이며, 검색량은 Google이 주는 대략값입니다. 언론이 많이 다룬 「오늘의 이슈」와 사람들이 찾아본 검색어를 비교해 볼 수 있습니다. 오늘의 이슈, 워드클라우드, AI 도우미에는 쓰지 않습니다.</p>
+      <p class="sub muted">Google 트렌드의 한국 인기 급상승 검색어를 걸러 내지 않고 그대로 보여 줍니다. 전체 검색량 순위가 아니라 최근 검색이 크게 는 검색어이며, 검색량은 Google이 주는 대략값입니다. 위의 「오늘의 이슈」(언론이 많이 다룬 것)와 사람들이 찾아본 검색어를 비교해 볼 수 있습니다. 오늘의 이슈, 워드클라우드, AI 도우미에는 쓰지 않습니다.</p>
     </section>
   </main>
 
-  <!-- 탭 3: 산정 기준 -->
+  <!-- 탭 3: 도서(서점 vs 도서관, FR-41: 사는 책과 빌리는 책을 나란히) -->
+  <main class="panel" id="tab-books" role="tabpanel" hidden>
+    <section class="card w6">
+      <h2>서점 베스트셀러 <span class="muted">· 예스24</span></h2>
+      <p class="sub muted" id="books-sub"></p>
+      <ol class="rows books" id="books"></ol>
+      <button class="more" id="books-more" hidden>더 보기</button>
+    </section>
+
+    <section class="card w6">
+      <h2>도서관 인기 대출 <span class="muted">· 도서관 정보나루</span></h2>
+      <p class="sub muted" id="library-sub"></p>
+      <ol class="rows books" id="library"></ol>
+      <button class="more" id="library-more" hidden>더 보기</button>
+    </section>
+  </main>
+
+  <!-- 탭 4: 산정 기준 -->
   <main class="panel method" id="tab-method" role="tabpanel" hidden>
     <section class="card">
       <h2>산정 기준</h2>
@@ -348,10 +333,12 @@ function render() {
   route();
 }
 
-/* 탭 이동. 주소: #today, #explore, #explore/키워드, #google, #method */
+/* 탭 이동. 주소: #home, #issues, #issues/키워드, #books, #method. 예전 주소(11-08 전)도 맞는 탭으로 */
+const OLD_TABS = { today: "home", explore: "issues", google: "issues" };
 function route() {
-  const [tab, word] = location.hash.slice(1).split("/");
-  const name = ["today", "explore", "google", "method"].includes(tab) ? tab : "today";
+  let [tab, word] = location.hash.slice(1).split("/");
+  tab = OLD_TABS[tab] || tab;
+  const name = ["home", "issues", "books", "method"].includes(tab) ? tab : "home";
   for (const a of document.querySelectorAll("nav.tabbar a")) a.setAttribute("aria-selected", String(a.dataset.tab === name));
   for (const p of document.querySelectorAll(".panel")) p.hidden = p.id !== `tab-${name}`;
   if (word) selectIssue(decodeURIComponent(word));
@@ -359,7 +346,7 @@ function route() {
 }
 
 function openIssue(word) {
-  location.hash = `explore/${encodeURIComponent(word)}`;
+  location.hash = `issues/${encodeURIComponent(word)}`;
   window.scrollTo({ top: 0 });
 }
 
@@ -464,7 +451,7 @@ function renderIssueBooks(issue) {
   sub(`「${word}」을(를) 더 깊이 이해할 책을 찾아볼 수 있습니다. AI가 제안하고, 도서관·서점 목록에서 실제 있는 책인지 확인합니다.`, true);
 }
 
-/* 워드클라우드 (FR-20~FR-22, FR-24). 탭 1은 뉴스 미리보기, 탭 2는 뉴스·도서·종합 */
+/* 워드클라우드 (FR-20~FR-22, FR-24). 모아보기 탭에서 뉴스·도서·종합 */
 const CLOUD_TEXT = {
   news: () => `뉴스 제목의 명사, 크기 = 언론사 수 × 평소 흔함 보정 · 상위 ${data.clouds.news.length}개`,
   books: () => data.books
@@ -476,7 +463,6 @@ const CLOUD_VALUE = { news: v => `점수 ${v}`, books: v => `책 ${v}권`, combi
 // 단어를 누르면 AI 도우미에 그 단어로 묻는다(FR-24, 10-30)
 const CLOUD_HINT = "단어를 누르면 AI 도우미가 그 단어로 답합니다. 마우스를 올리면 점수가 보입니다.";
 const clouds = {
-  preview: { canvas: "cloud-preview", info: "preview-info", kind: "news", width: 0, limit: 50 },  // 미리보기는 상위 50개만
   main: { canvas: "cloud-main", info: "cloud-info", kind: "news", width: 0, limit: 0 },
 };
 let fontReady = false;
@@ -485,7 +471,6 @@ function renderCloudTabs() {
   for (const t of document.querySelectorAll("#cloud-tabs button")) {
     t.addEventListener("click", () => { clouds.main.kind = t.dataset.cloud; drawCloud(clouds.main); });
   }
-  $("preview-sub").textContent = CLOUD_TEXT.news().replace(/상위 \d+개$/, `상위 ${Math.min(clouds.preview.limit, data.clouds.news.length)}개`);
   // 글꼴을 먼저 읽어야 캔버스에 한글이 나눔고딕으로 그려진다
   document.fonts.load('20px "NanumGothic"').finally(() => { fontReady = true; drawVisibleClouds(); });
   let timer;
@@ -609,7 +594,7 @@ function toggleModelMenu(open) {
 }
 
 function askAbout(word) {
-  if (location.hash.split("/")[0] !== "#explore") { location.hash = "explore"; route(); }  // 탭을 먼저 보여야 스크롤된다
+  if (location.hash.split("/")[0] !== "#home") { location.hash = "home"; route(); }  // 탭을 먼저 보여야 스크롤된다
   $("chat").scrollIntoView({ behavior: "smooth", block: "nearest" });
   askChat(`「${word}」 관련해서 오늘 무슨 일이 있었어?`);
 }
