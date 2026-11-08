@@ -6,12 +6,14 @@
 - YES24는 하루 1회만 부르고(core/sources/yes24.py), data.json에는 화면에 보일 필드만 담는다(책 소개 제외). 빌드 때마다 덮어쓴다.
 - 도서관 정보나루 인기 대출도 하루 1회(core/sources/data4library.py). 표지 URL은 받지도 담지도 않는다.
 - 뉴스는 빌드마다 store/news_store.json에 쌓고, 쌓인 최근 N시간치로 분석한다(core/news_store.py). 주기는 30분.
+- Google 트렌드 인기 급상승 검색어는 빌드마다 1회 받아 그대로 담는다(별도 탭 표시만, 분석·워드클라우드·AI 도우미에는 안 씀, 11-08).
 """
 import json
 import sys
 from datetime import datetime, timedelta, timezone
 
 from core import config, keywords, news_store
+from core.sources import google_trends
 from core.sources._http import ApiError
 from core.sources.data4library import collect_popular_loans_daily
 from core.sources.naver_news import collect_news
@@ -72,7 +74,13 @@ def build():
             "generic_rescued": [],
         },
         "news": None, "books": None, "library": None, "issues": [], "clouds": {}, "common": [],
+        "google_trends": None,
     }
+
+    try:
+        data["google_trends"] = {"collected_at": iso(datetime.now(KST)), "terms": google_trends.collect()}
+    except ApiError as e:
+        errors.append(f"Google 트렌드: {e}")
 
     news_counts, book_counts = None, None
     if store is not None:
@@ -156,7 +164,8 @@ if __name__ == "__main__":
     print(f"  누적: 뉴스 {n.get('article_count')}건, 언론사 {n.get('outlet_count')}곳, "
           f"최근 {config.NEWS_WINDOW_HOURS}시간 중 {n.get('covered_hours')}시간 덮음, 빈 구간 {len(n.get('gaps') or [])}개, 빌드 {n.get('builds')}회")
     print(f"  도서 {len(result['books']['items']) if result['books'] else 0}권, "
-          f"도서관 인기 대출 {len(result['library']['items']) if result['library'] else 0}줄")
+          f"도서관 인기 대출 {len(result['library']['items']) if result['library'] else 0}줄, "
+          f"Google 인기 검색어 {len(result['google_trends']['terms']) if result['google_trends'] else 0}개")
     print(f"  이슈: {', '.join(i['word'] for i in result['issues'])}")
     rescued = ", ".join(f"{w}({x}배)" for w, x in result["method"]["generic_rescued"])
     print(f"  건져 올린 일반 단어: {rescued or '없음'}")
