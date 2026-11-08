@@ -1,7 +1,7 @@
 """도서관 정보나루 질문 때 부르는 조회(AI 도우미, 이슈 관련 도서). pandas 없이 돈다(배포 서버 함수가 가볍게, 10-30).
 
 근거: input/도서관정보나루_API_Manual.md (v20260620)
-- srchBooks(49~51쪽): 제목 검색, 대출 많은 순(관련 도서 검증)
+- srchBooks(49~51쪽): 제목 검색, 대출 많은 순(관련 도서 검증). 키워드 검색(AI 도우미 답의 관련 도서, 11-08)
 - loanItemSrch(9~12쪽): 조건별 인기 대출. 코드는 58~63쪽(성별, 연령, 지역, 대주제)
 - libSrchByBook(38~39쪽): 책을 가진 도서관, region 필수
 - bookImageURL은 AI 입력과 저장이 금지되어(12쪽) 받지도 담지도 않는다.
@@ -83,6 +83,13 @@ def find_book(title, author):
                 and same_title(title, doc.get("bookname")) and same_author(author, doc.get("authors"))):
             return _book(doc)
     return None
+
+
+def search_keyword(keyword, size=20):
+    """키워드로 찾은 책, 대출 많은 순(50쪽: sort가 없으면 대출건수 순, 키워드는 일치검색, ;로 여러 개면 AND).
+    아동·학습참고서는 뺀다."""
+    body = _call("srchBooks", {"keyword": keyword, "pageSize": size})
+    return [_book(doc) for doc in _docs(body) if (doc.get("addition_symbol") or " ")[0] not in SKIP_READERS]
 
 
 def popular_loans(conditions, n):

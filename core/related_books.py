@@ -1,6 +1,9 @@
-"""관련 도서: AI 제안 → 정보나루·예스24로 확인 (PRD FR-31~33, FR-51, 10-31 작업자 결정).
+"""관련 도서 (PRD FR-31~33, FR-51).
 
 - AI 도우미 답과 이슈 상세의 [관련 도서 찾기] 버튼을 누를 때만 부른다(답과 함께 책을 들이밀지 않음).
+- AI 도우미 답(for_keywords, 11-08 작업자 결정): 답과 함께 받은 검색어로 정보나루 키워드 검색(대출 많은 순)만 한다.
+  Gemini를 다시 부르지 않고 예스24도 쓰지 않는다(AI 제안·예스24 확인은 맞는 책이 적었음).
+- 이슈 상세(for_issue, 10-31 작업자 결정): 아래처럼 AI 제안 → 정보나루·예스24로 확인.
   이전 방식(이슈 낱말을 그대로 제목 검색)은 동명이인 소설, 직원용 실무서처럼 관련 없는 책이 많이 걸려 바꿨다(10-30 빌드).
 - Gemini는 주제에 맞는 책의 제목과 저자만 제안한다. 서버가 정보나루 제목 검색(대출 많은 순, 매뉴얼 49~51쪽)에서 먼저,
   없으면 예스24 상품 검색에서 제목·저자가 맞는 책을 찾는다. 확인되지 않은 제안은 버린다.
@@ -150,12 +153,25 @@ def for_issue(word, data=None, model=None):
     return _issue_cache[key]
 
 
-def for_answer(question, answer, model=None):
-    """AI 도우미 답 아래의 [관련 도서 찾기]. 질문과 그 답을 [자료]로 넘긴다(길이는 잘라서)."""
-    question, answer = (question or "").strip()[:config.CHAT_MAX_CHARS], (answer or "").strip()[:800]
-    if not question:
-        raise chat.ChatError("질문이 없습니다.")
-    return suggest(f"질문: {question}", f"AI 도우미의 답:\n{answer}", model)
+def for_keywords(keywords):
+    """AI 도우미 답 아래의 [관련 도서 찾기]. 검색어를 모두 포함한 책만(AND, 11-08 작업자 결정) 대출 많은 책부터
+    config.RELATED_SHOW_N권. 같은 제목은 한 권만.
+    돌려주는 값: {books[{title, author, publisher, link, loans, source, busan}], keywords}"""
+    words = [str(k).strip()[:20] for k in keywords or [] if str(k).strip()][:3] if isinstance(keywords, list) else []
+    if not words:
+        raise chat.ChatError("찾을 검색어가 없습니다.")
+    found = _safe(library_search.search_keyword, ";".join(dict.fromkeys(words)))
+    if found is _FAILED:
+        raise chat.ChatError("도서관 정보나루에 연결하지 못했습니다. 잠시 뒤 다시 눌러 주세요.")
+    books, seen = [], set()
+    for b in found:
+        if b["isbn"] and b["title"] not in seen and len(books) < config.RELATED_SHOW_N:
+            seen.add(b["title"])
+            books.append({**b, "source": "도서관 정보나루"})
+    with ThreadPoolExecutor(max_workers=len(books) or 1) as pool:
+        holdings = list(pool.map(_busan, books))
+    return {"books": [{**{k: v for k, v in b.items() if k not in ("isbn", "year")}, "busan": h} for b, h in zip(books, holdings)],
+            "keywords": words}
 
 
 if __name__ == "__main__":

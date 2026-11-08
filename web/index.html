@@ -128,6 +128,7 @@
   .msg .msg-h { margin-top: 10px; font-size: .8rem; font-weight: 600; color: var(--muted); }
   .msg .msg-h + ol { margin-top: 2px; }
   .msg > div.muted { font-size: .84rem; }
+  .msg .verify { margin-bottom: 6px; padding: 6px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: .84rem; }
   /* 모델 선택(Claude Code 모델 선택 버튼처럼 현재 값을 보이고 누르면 메뉴) */
   .chat-form { position: relative; }
   .chat-form .model-btn { background: none; border: 1px solid var(--line); color: var(--muted); padding: 8px 10px; white-space: nowrap; font-size: .82rem; }
@@ -244,7 +245,7 @@
 
     <section class="card w5" id="chat">
       <h2>AI 도우미 <span class="muted">· Gemini</span></h2>
-      <p class="sub muted">이 화면의 이슈, 기사 제목, 도서 목록 안에서만 답합니다. 없는 내용은 「근거 부족」이라고 답합니다.</p>
+      <p class="sub muted">이 화면의 이슈, 기사 제목, 도서 목록으로 답합니다. 이 자료로 답할 수 없는 질문은 AI가 일반 지식으로 답하며, 그 답은 반드시 검증이 필요합니다.</p>
       <div class="chat-log" id="chat-log" aria-live="polite">
         <p>예: 「방산 관련해서 오늘 무슨 일이 있었어?」, 「서점과 도서관 1위 책은?」</p>
         <p class="muted">워드클라우드의 단어를 누르면 그 단어로 바로 물어봅니다.</p>
@@ -625,21 +626,27 @@ async function askChat(question) {
     const out = await res.json();
     if (!res.ok) { wait.className = "msg a fail"; wait.textContent = out.error || "답을 받지 못했습니다."; return; }
     const children = [];
-    // 관련 도서(FR-51, 10-31): 답과 함께 책을 붙이지 않고, 찾아볼 수 있다는 안내를 첫 줄에 둔다. 누르면 /api/books
-    if (!out.insufficient && !out.loans) {
+    // 관련 도서(FR-51, 11-08): 답과 함께 책을 붙이지 않고, 찾아볼 수 있다는 안내를 첫 줄에 둔다.
+    // 누르면 답과 함께 받은 검색어로 도서관 정보나루 인기 대출(대출 많은 순)을 찾는다. AI는 책을 고르지 않는다
+    const keywords = out.book_keywords || [];
+    if (!out.loans && keywords.length) {
+      const kw = keywords.map(k => `「${k}」`).join(" ");
       const hint = el("div", { class: "book-hint" }, el("span", { text: "이 주제의 관련 도서도 찾아볼 수 있습니다." }));
       const btn = el("button", { type: "button", class: "more", text: "관련 도서 찾기", onclick: async () => {
         btn.disabled = true;
-        hint.replaceChildren(el("span", { class: "muted", text: "AI가 책을 제안하고 도서관·서점 목록에서 확인하는 중…" }));
-        const r = await fetchBooks({ question, answer: out.answer });
+        hint.replaceChildren(el("span", { class: "muted", text: `도서관 정보나루에서 ${kw}(으)로 찾는 중…` }));
+        const r = await fetchBooks({ keywords });
         hint.replaceChildren(
-          el("div", { class: "msg-h", text: r.error ? "관련 도서" : (r.books.length ? `관련 도서 · ${BOOKS_NOTE}` : "관련 도서") }),
+          el("div", { class: "msg-h", text: r.error ? "관련 도서"
+            : `관련 도서 · 도서관 정보나루에서 ${kw}(으)로 찾은 책, 대출 많은 순. 소장 도서관은 도서관 정보나루` }),
           r.books && r.books.length ? el("ul", { class: "rows" }, ...r.books.map(bookItem))
-            : el("div", { class: "muted", text: r.error || "AI가 제안한 책 중 도서관·서점 목록에서 확인된 책이 없습니다." }));
+            : el("div", { class: "muted", text: r.error || "도서관 정보나루에서 이 검색어로 찾은 책이 없습니다." }));
       } });
       hint.append(btn);
       children.push(hint);
     }
+    // 일반 질문(11-08): 수집한 자료로 답할 수 없어 AI가 일반 지식으로 답한 경우
+    if (out.general) children.push(el("div", { class: "verify", text: "⚠ 이 답은 수집한 자료가 아닌 AI가 작성한 답이므로 반드시 검증이 필요합니다." }));
     children.push(el("div", { text: out.answer }));
     if (out.sources && out.sources.length) {
       children.push(el("div", { class: "msg-h", text: "근거 기사" }));
